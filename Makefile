@@ -95,13 +95,19 @@ download-models-q4:
 	@ls -lh models/
 
 # Helper function for HF download
+HF_REPO_URL := https://huggingface.co/audiohacking/dasheng-audiogen-gguf/resolve/main
+
 define hf_download
 	@if command -v hf >/dev/null 2>&1; then \
 		for f in $(1); do hf download audiohacking/dasheng-audiogen-gguf $$f --local-dir models/; done; \
-	elif command -v huggingface-cli >/dev/null 2>&1; then \
+	elif command -v huggingface-cli >/dev/null 2>&1 && huggingface-cli download --help >/dev/null 2>&1; then \
 		for f in $(1); do huggingface-cli download audiohacking/dasheng-audiogen-gguf $$f --local-dir models/; done; \
+	elif command -v curl >/dev/null 2>&1; then \
+		for f in $(1); do echo "Downloading $$f..."; curl -L -o models/$$f $(HF_REPO_URL)/$$f; done; \
+	elif command -v wget >/dev/null 2>&1; then \
+		for f in $(1); do echo "Downloading $$f..."; wget -O models/$$f $(HF_REPO_URL)/$$f; done; \
 	else \
-		echo "Error: hf or huggingface-cli not found. Install with: pip install huggingface_hub[cli]"; \
+		echo "Error: No download tool found. Install curl, wget, or huggingface_hub[cli]"; \
 		exit 1; \
 	fi
 endef
