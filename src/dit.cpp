@@ -7,6 +7,7 @@
 
 #include "ggml-cpu.h"
 #include "ggml.h"
+#include "backend.h"
 
 namespace dasheng {
 
@@ -20,6 +21,7 @@ constexpr int kHeadDim = kEmbedDim / kNumHeads;  // 64
 constexpr int kFreqEmbedDim = 256;
 constexpr int kNumHalfBlocks = 16;  // in_blocks == out_blocks count
 constexpr float kLnEps = 1e-5f;
+constexpr size_t kMaxGraphSize = 1u << 16;
 
 // timestep_embedding() from reference/modules.py: half=dim/2, freqs[i] =
 // exp(-log(max_period) * i / half), embedding = cat(cos(t*freqs), sin(t*freqs)).
@@ -38,8 +40,22 @@ std::vector<float> sinusoidal_timestep_embedding(float t, int dim, float max_per
 }  // namespace
 
 struct DiT::Impl {
-    explicit Impl(const std::string &gguf_path, int n_threads) : model(gguf_path), n_threads(n_threads) {}
-    GgufModel model;
+    explicit Impl(const std::string &gguf_path, int n_threads)
+        : bp(global_backend_pair()),
+          model(gguf_path, bp.backend),
+          sched(nullptr),
+          n_threads(n_threads) {
+        // Create scheduler for compute graphs
+        sched = backend_sched_new(bp, kMaxGraphSize);
+    }
+
+    ~Impl() {
+        if (sched) ggml_backend_sched_free(sched);
+    }
+
+    BackendPair& bp;
+    GgufModelGPU model;
+    ggml_backend_sched_t sched;
     int n_threads;
 };
 
@@ -53,33 +69,33 @@ int DiT::embed_dim() const { return kEmbedDim; }
 std::vector<float> DiT::forward(const std::vector<float> &x, int T, float timestep,
                                  const std::vector<float> &context, int context_len,
                                  const std::vector<float> &time_aligned_content) {
-    GgufModel &model = impl_->model;
+    GgufModelGPU &model = impl_->model;
+    ggml_backend_sched_t sched = impl_->sched;
 
-    const size_t per_block_bytes = static_cast<size_t>(T) * T * 400 +
-                                    static_cast<size_t>(T) * context_len * 200 +
-                                    static_cast<size_t>(T) * 400000;
-    const size_t mem_size = 512ull * 1024 * 1024 + per_block_bytes * 34 * 3;
-
-    struct ggml_init_params cparams = {mem_size, nullptr, false};
+    // Compute context - no_alloc=true, scheduler will allocate
+    const size_t mem_size = ggml_tensor_overhead() * kMaxGraphSize + 1024 * 1024;
+    struct ggml_init_params cparams = {mem_size, nullptr, true};  // no_alloc=true
     struct ggml_context *ctx = ggml_init(cparams);
     if (!ctx) {
-        throw std::runtime_error("DiT::forward: ggml_init failed (mem_size too large?)");
+        throw std::runtime_error("DiT::forward: ggml_init failed");
     }
 
-    // --- inputs ---
+    // --- inputs (will be set after scheduler allocation) ---
     struct ggml_tensor *x_in = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, kLatentDim, T);
-    std::memcpy(x_in->data, x.data(), x.size() * sizeof(float));
+    ggml_set_name(x_in, "x_in");
+    ggml_set_input(x_in);
 
     struct ggml_tensor *context_in = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, kContentDim, context_len);
-    std::memcpy(context_in->data, context.data(), context.size() * sizeof(float));
+    ggml_set_name(context_in, "context_in");
+    ggml_set_input(context_in);
 
     struct ggml_tensor *ta_content_in = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, kContentDim, T);
-    std::memcpy(ta_content_in->data, time_aligned_content.data(), time_aligned_content.size() * sizeof(float));
+    ggml_set_name(ta_content_in, "ta_content_in");
+    ggml_set_input(ta_content_in);
 
     struct ggml_tensor *positions = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, T);
-    for (int i = 0; i < T; ++i) {
-        static_cast<int32_t *>(positions->data)[i] = i;
-    }
+    ggml_set_name(positions, "positions");
+    ggml_set_input(positions);
 
     auto linear = [&](struct ggml_tensor *w, struct ggml_tensor *b, struct ggml_tensor *in) {
         struct ggml_tensor *out = ggml_mul_mat(ctx, w, in);
@@ -112,10 +128,10 @@ std::vector<float> DiT::forward(const std::vector<float> &x, int T, float timest
     ctx_h = ggml_silu(ctx, ctx_h);
     ctx_h = linear(model.tensor("backbone.context_embed.2.weight"), model.tensor("backbone.context_embed.2.bias"), ctx_h);  // [1536, context_len]
 
-    // --- time embedding ---
-    std::vector<float> t_freq = sinusoidal_timestep_embedding(timestep, kFreqEmbedDim);
+    // --- time embedding (input tensor, set after scheduler allocation) ---
     struct ggml_tensor *t_freq_t = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, kFreqEmbedDim);
-    std::memcpy(t_freq_t->data, t_freq.data(), t_freq.size() * sizeof(float));
+    ggml_set_name(t_freq_t, "t_freq");
+    ggml_set_input(t_freq_t);
 
     struct ggml_tensor *time_token =
         linear(model.tensor("backbone.time_embed.mlp.0.weight"), model.tensor("backbone.time_embed.mlp.0.bias"), t_freq_t);
@@ -276,12 +292,41 @@ std::vector<float> DiT::forward(const std::vector<float> &x, int T, float timest
     conv_out = ggml_cont(ctx, ggml_transpose(ctx, conv_out));  // [1280,T]
     conv_out = ggml_add(ctx, conv_out, model.tensor("backbone.final_block.final_layer.bias"));
 
-    struct ggml_cgraph *graph = ggml_new_graph_custom(ctx, 1u << 16, false);
+    // Build compute graph
+    struct ggml_cgraph *graph = ggml_new_graph_custom(ctx, kMaxGraphSize, false);
     ggml_build_forward_expand(graph, conv_out);
-    ggml_graph_compute_with_ctx(ctx, graph, impl_->n_threads);
+    ggml_set_output(conv_out);
 
+    // Reset scheduler and allocate graph
+    ggml_backend_sched_reset(sched);
+    if (!ggml_backend_sched_alloc_graph(sched, graph)) {
+        ggml_free(ctx);
+        throw std::runtime_error("DiT::forward: failed to allocate compute graph");
+    }
+
+    // Set input tensors
+    ggml_backend_tensor_set(x_in, x.data(), 0, x.size() * sizeof(float));
+    ggml_backend_tensor_set(context_in, context.data(), 0, context.size() * sizeof(float));
+    ggml_backend_tensor_set(ta_content_in, time_aligned_content.data(), 0, time_aligned_content.size() * sizeof(float));
+
+    // Set positions
+    std::vector<int32_t> pos_data(T);
+    for (int i = 0; i < T; ++i) pos_data[i] = i;
+    ggml_backend_tensor_set(positions, pos_data.data(), 0, pos_data.size() * sizeof(int32_t));
+
+    // Set timestep embedding
+    std::vector<float> t_freq = sinusoidal_timestep_embedding(timestep, kFreqEmbedDim);
+    ggml_backend_tensor_set(t_freq_t, t_freq.data(), 0, t_freq.size() * sizeof(float));
+
+    // Compute
+    if (ggml_backend_sched_graph_compute(sched, graph) != GGML_STATUS_SUCCESS) {
+        ggml_free(ctx);
+        throw std::runtime_error("DiT::forward: graph compute failed");
+    }
+
+    // Get output
     std::vector<float> result(static_cast<size_t>(T) * kLatentDim);
-    std::memcpy(result.data(), conv_out->data, result.size() * sizeof(float));
+    ggml_backend_tensor_get(conv_out, result.data(), 0, result.size() * sizeof(float));
 
     ggml_free(ctx);
     return result;
