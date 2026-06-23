@@ -1,8 +1,6 @@
 # audiogen.cpp
 
-High-performance GGML inference engine for text-to-audio generation, featuring Metal GPU acceleration.
-
-Currently supports [`mispeech/Dasheng-AudioGen`](https://huggingface.co/mispeech/Dasheng-AudioGen), a 2B-parameter flow-matching model.
+High-performance GGML inference engine for text-to-audio generation for [`mispeech/Dasheng-AudioGen`](https://huggingface.co/mispeech/Dasheng-AudioGen), a 2B-parameter flow-matching model.
 
 Pre-converted GGUF weights: [`audiohacking/dasheng-audiogen-gguf`](https://huggingface.co/audiohacking/dasheng-audiogen-gguf)
 
