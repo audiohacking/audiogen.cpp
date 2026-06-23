@@ -24,7 +24,7 @@ make download-models
 
 ## Performance
 
-| Backend | 25 Steps | Hardware |
+| Backend | 10s @ 25 Steps | Hardware |
 |---------|----------|----------|
 | Metal GPU | ~6s | Apple M3 Ultra |
 | CPU | ~163s | Apple M3 Ultra (16 threads) |
