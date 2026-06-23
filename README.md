@@ -1,6 +1,6 @@
 # audiogen.cpp
 
-High-performance C++17 GGML inference engine for local text-to-audio generation using [`AudioGen`](https://huggingface.co/mispeech/Dasheng-AudioGen) a 2B-parameter flow-matching model using pre-converted GGUF weights [`audiohacking/dasheng-audiogen-gguf`](https://huggingface.co/audiohacking/dasheng-audiogen-gguf) _(fp16, q8, q4)_
+High-performance C++17 GGML inference engine for local text-to-audio generation using [`Dasheng-AudioGen`](https://huggingface.co/mispeech/Dasheng-AudioGen) a 2B-parameter flow-matching model using pre-converted GGUF weights [`audiohacking/dasheng-audiogen-gguf`](https://huggingface.co/audiohacking/dasheng-audiogen-gguf) _(fp16, q8, q4)_
 
 ## Quick Start
 
