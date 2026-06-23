@@ -1,8 +1,47 @@
+# Build artifacts
 build/
 build-*/
-*.gguf
+*.o
+*.a
+*.so
+*.dylib
+
+# Models (downloaded separately)
+models/*.gguf
+models/*.model
+
+# Output
+output/
 *.wav
+
+# Python
 .venv/
-.DS_Store
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
+
+# IDE/Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Local development tools
+.claude/
+.serena/
+.ckignore
+.cursor/
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
