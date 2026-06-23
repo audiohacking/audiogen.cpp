@@ -64,17 +64,33 @@ test-smoke: cpu
 test-smoke-metal: metal
 	$(BUILD_DIR_METAL)/dasheng-audiogen --smoke-test
 
-# Download pre-converted models from HuggingFace
-# Default: F16 models (~5.7GB total)
+# Download pre-converted models from HuggingFace (interactive)
 .PHONY: download-models
 download-models:
+	@echo ""
+	@echo "Select model variant to download:"
+	@echo "  1) F16  - Best quality     (~5.7GB)"
+	@echo "  2) Q8   - Great quality    (~3.8GB)"
+	@echo "  3) Q4   - Good quality     (~2.8GB)"
+	@echo ""
+	@read -p "Enter choice [1-3]: " choice; \
+	case $$choice in \
+		1) $(MAKE) download-models-f16 ;; \
+		2) $(MAKE) download-models-q8 ;; \
+		3) $(MAKE) download-models-q4 ;; \
+		*) echo "Invalid choice. Use: make download-models-f16, download-models-q8, or download-models-q4"; exit 1 ;; \
+	esac
+
+# F16 models (~5.7GB total) - best quality
+.PHONY: download-models-f16
+download-models-f16:
 	@mkdir -p models
 	@echo "Downloading F16 models (~5.7GB)..."
 	@$(call hf_download,t5_encoder.gguf dit.gguf vocoder.gguf spiece.model)
 	@echo "Models downloaded to models/"
 	@ls -lh models/
 
-# Q8 quantized models (~3.8GB total) - good quality, smaller size
+# Q8 quantized models (~3.8GB total) - great quality, smaller size
 .PHONY: download-models-q8
 download-models-q8:
 	@mkdir -p models
@@ -84,7 +100,7 @@ download-models-q8:
 	@echo "Models downloaded to models/"
 	@ls -lh models/
 
-# Q4 quantized models (~2.8GB total) - smallest size, slight quality reduction
+# Q4 quantized models (~2.8GB total) - good quality, smallest size
 .PHONY: download-models-q4
 download-models-q4:
 	@mkdir -p models
@@ -175,9 +191,10 @@ help:
 	@echo "  make build-all        Build both CPU and Metal versions"
 	@echo ""
 	@echo "Models:"
-	@echo "  make download-models     Download F16 GGUF models (~5.7GB)"
-	@echo "  make download-models-q8  Download Q8 quantized models (~3.8GB)"
-	@echo "  make download-models-q4  Download Q4 quantized models (~2.8GB)"
+	@echo "  make download-models      Interactive model selection"
+	@echo "  make download-models-f16  Download F16 models (~5.7GB)"
+	@echo "  make download-models-q8   Download Q8 models (~3.8GB)"
+	@echo "  make download-models-q4   Download Q4 models (~2.8GB)"
 	@echo "  make convert             Convert models from original weights (F16)"
 	@echo "  make convert-q8          Convert with Q8 quantization"
 	@echo "  make convert-q4          Convert with Q4 quantization"
