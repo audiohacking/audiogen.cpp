@@ -1,5 +1,5 @@
 ---
-license: mit
+license: apache-2.0
 tags:
   - audio
   - text-to-audio
@@ -10,7 +10,23 @@ base_model: mispeech/Dasheng-AudioGen
 
 # Dasheng-AudioGen GGUF
 
-GGUF-converted weights for [mispeech/Dasheng-AudioGen](https://huggingface.co/mispeech/Dasheng-AudioGen), a 2B-parameter flow-matching text-to-audio model.
+GGUF-converted weights for [mispeech/Dasheng-AudioGen](https://huggingface.co/mispeech/Dasheng-AudioGen)
+
+
+**Dasheng-AudioGen** is a unified audio generation model that can jointly synthesize **intelligible speech, music, sound effects, and environmental acoustics** from text descriptions.
+
+<p align="center">
+  <video
+    src="https://github.com/user-attachments/assets/497f5688-8731-4830-8ee7-b9cf4234d900"
+    controls
+    autoplay
+    muted
+    loop
+    playsinline
+    width="85%">
+  </video>
+</p>
+
 
 ## Model Variants
 
@@ -104,4 +120,4 @@ This is a GGUF conversion of [mispeech/Dasheng-AudioGen](https://huggingface.co/
 
 ## License
 
-MIT - Same as the original model
+Apache-2.0 - Same as the original model
