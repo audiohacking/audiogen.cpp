@@ -45,3 +45,7 @@ __pycache__/
 # Temporary files
 *.tmp
 *.temp
+.venv
+
+# Third-party dependencies (init locally via: git submodule update --init --recursive)
+third_party/
