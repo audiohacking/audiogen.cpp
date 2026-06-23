@@ -346,10 +346,10 @@ int main(int argc, char **argv) {
     }
 
     // Initialize backend (auto-selects Metal on macOS, CUDA if available, else CPU)
-    dasheng::Backend &backend = dasheng::global_backend();
+    dasheng::BackendPair& bp = dasheng::global_backend_pair();
 
     std::fprintf(stderr, "dasheng-audiogen\n");
-    std::fprintf(stderr, "  backend:  %s%s\n", backend.name(), backend.is_gpu() ? " (GPU)" : " (CPU)");
+    std::fprintf(stderr, "  backend:  %s%s\n", ggml_backend_name(bp.backend), bp.has_gpu ? " (GPU)" : "");
     std::fprintf(stderr, "  t5:       %s\n", t5_path);
     std::fprintf(stderr, "  dit:      %s\n", dit_path);
     std::fprintf(stderr, "  vocoder:  %s\n", vocoder_path);

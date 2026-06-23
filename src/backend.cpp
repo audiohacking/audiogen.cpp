@@ -1,124 +1,159 @@
 #include "backend.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <stdexcept>
+#include <thread>
 
 #include "ggml-cpu.h"
-
-#ifdef GGML_USE_METAL
-#include "ggml-metal.h"
-#endif
-
-#ifdef GGML_USE_CUDA
-#include "ggml-cuda.h"
-#endif
 
 namespace dasheng {
 
 namespace {
 
-std::unique_ptr<Backend> g_backend;
+// Singleton backend pair
+BackendPair g_backend_pair = {nullptr, nullptr, nullptr, false};
+bool g_initialized = false;
+
+// Get physical core count (hardware_concurrency includes hyperthreads)
+int get_physical_cores() {
+    int n = static_cast<int>(std::thread::hardware_concurrency());
+    // Assume 2 threads per core (hyperthreading)
+    return n > 1 ? n / 2 : 1;
+}
 
 }  // namespace
 
-Backend::Type Backend::best_available() {
-#ifdef GGML_USE_METAL
-    return Type::Metal;
-#elif defined(GGML_USE_CUDA)
-    return Type::CUDA;
-#else
-    return Type::CPU;
-#endif
-}
-
-Backend::Backend(Type type) {
-    if (type == Type::Auto) {
-        type = best_available();
+BackendPair backend_init(const char* name) {
+    if (g_initialized) {
+        return g_backend_pair;
     }
 
-    type_ = type;
+    BackendPair bp = {nullptr, nullptr, nullptr, false};
 
-    switch (type) {
-        case Type::Metal:
-#ifdef GGML_USE_METAL
-            backend_ = ggml_backend_metal_init();
-            if (!backend_) {
-                std::fprintf(stderr, "[backend] Metal init failed, falling back to CPU\n");
-                type_ = Type::CPU;
-                backend_ = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
+    // Check for explicit backend selection via environment
+    const char* env_backend = std::getenv("GGML_BACKEND");
+
+    // Try to get the best available backend (Metal on macOS, CUDA on Linux, etc.)
+    if (env_backend) {
+        bp.backend = ggml_backend_init_by_name(env_backend, nullptr);
+        if (!bp.backend) {
+            std::fprintf(stderr, "[%s] warning: requested backend '%s' not found\n", name, env_backend);
+        }
+    }
+
+    if (!bp.backend) {
+        bp.backend = ggml_backend_init_best();
+    }
+
+    if (!bp.backend) {
+        std::fprintf(stderr, "[%s] error: no backend available\n", name);
+        throw std::runtime_error("No GGML backend available");
+    }
+
+    // Check if we got a GPU backend
+    ggml_backend_dev_t dev = ggml_backend_get_device(bp.backend);
+    if (dev) {
+        enum ggml_backend_dev_type dev_type = ggml_backend_dev_type(dev);
+        bp.has_gpu = (dev_type == GGML_BACKEND_DEVICE_TYPE_GPU);
+    }
+
+    std::fprintf(stderr, "[%s] primary backend: %s%s\n",
+                 name, ggml_backend_name(bp.backend),
+                 bp.has_gpu ? " (GPU)" : "");
+
+    // Always initialize CPU backend as fallback
+    bp.cpu_backend = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
+    if (!bp.cpu_backend) {
+        std::fprintf(stderr, "[%s] warning: CPU backend init failed\n", name);
+    } else {
+        // Set thread count for CPU backend
+        int n_threads = get_physical_cores();
+
+        // Get set_n_threads function from registry
+        ggml_backend_reg_t cpu_reg = ggml_backend_dev_backend_reg(
+            ggml_backend_get_device(bp.cpu_backend));
+        if (cpu_reg) {
+            auto set_threads = (ggml_backend_set_n_threads_t)
+                ggml_backend_reg_get_proc_address(cpu_reg, "ggml_backend_set_n_threads");
+            if (set_threads) {
+                set_threads(bp.cpu_backend, n_threads);
+                std::fprintf(stderr, "[%s] CPU backend: %d threads\n", name, n_threads);
             }
-#else
-            std::fprintf(stderr, "[backend] Metal not compiled in, using CPU\n");
-            type_ = Type::CPU;
-            backend_ = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
-#endif
-            break;
-
-        case Type::CUDA:
-#ifdef GGML_USE_CUDA
-            backend_ = ggml_backend_cuda_init(0);  // device 0
-            if (!backend_) {
-                std::fprintf(stderr, "[backend] CUDA init failed, falling back to CPU\n");
-                type_ = Type::CPU;
-                backend_ = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
-            }
-#else
-            std::fprintf(stderr, "[backend] CUDA not compiled in, using CPU\n");
-            type_ = Type::CPU;
-            backend_ = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
-#endif
-            break;
-
-        case Type::CPU:
-        case Type::Auto:
-        default:
-            backend_ = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
-            type_ = Type::CPU;
-            break;
+        }
     }
 
-    if (!backend_) {
-        throw std::runtime_error("Failed to initialize any backend");
+    // If primary backend is same as CPU, don't duplicate
+    if (bp.cpu_backend && bp.backend == bp.cpu_backend) {
+        bp.cpu_backend = nullptr;
     }
 
-    std::fprintf(stderr, "[backend] initialized: %s\n", name());
+    g_backend_pair = bp;
+    g_initialized = true;
+
+    return bp;
 }
 
-Backend::~Backend() {
-    if (backend_) {
-        ggml_backend_free(backend_);
+ggml_backend_sched_t backend_sched_new(const BackendPair& bp, size_t graph_size) {
+    ggml_backend_t backends[3];
+    ggml_backend_buffer_type_t buffer_types[3];
+    int n_backends = 0;
+
+    // Primary backend first (gets priority)
+    backends[n_backends] = bp.backend;
+    buffer_types[n_backends] = ggml_backend_get_default_buffer_type(bp.backend);
+    n_backends++;
+
+    // CPU fallback if different from primary
+    if (bp.cpu_backend && bp.cpu_backend != bp.backend) {
+        backends[n_backends] = bp.cpu_backend;
+        // Use host buffer type from GPU if available (pinned memory)
+        if (bp.has_gpu) {
+            ggml_backend_dev_t dev = ggml_backend_get_device(bp.backend);
+            ggml_backend_buffer_type_t host_buft = ggml_backend_dev_host_buffer_type(dev);
+            buffer_types[n_backends] = host_buft ? host_buft : ggml_backend_cpu_buffer_type();
+        } else {
+            buffer_types[n_backends] = ggml_backend_cpu_buffer_type();
+        }
+        n_backends++;
     }
-}
 
-ggml_backend_buffer_type_t Backend::buffer_type() const {
-    return ggml_backend_get_default_buffer_type(backend_);
-}
+    ggml_backend_sched_t sched = ggml_backend_sched_new(
+        backends,
+        buffer_types,
+        n_backends,
+        graph_size,
+        false,  // parallel
+        true    // op_offload - let scheduler pick best backend per op
+    );
 
-enum ggml_status Backend::compute(struct ggml_cgraph* graph) {
-    return ggml_backend_graph_compute(backend_, graph);
-}
-
-void Backend::synchronize() {
-    ggml_backend_synchronize(backend_);
-}
-
-const char* Backend::name() const {
-    return ggml_backend_name(backend_);
-}
-
-bool Backend::is_gpu() const {
-    return type_ == Type::Metal || type_ == Type::CUDA;
-}
-
-Backend& global_backend() {
-    if (!g_backend) {
-        g_backend = std::make_unique<Backend>(Backend::Type::Auto);
+    if (!sched) {
+        throw std::runtime_error("Failed to create backend scheduler");
     }
-    return *g_backend;
+
+    return sched;
 }
 
-void init_global_backend(Backend::Type type) {
-    g_backend = std::make_unique<Backend>(type);
+void backend_release(ggml_backend_t backend, ggml_backend_t cpu_backend) {
+    // In a more complete implementation, we'd reference count
+    // For now, just mark as uninitialized
+    g_initialized = false;
+
+    if (cpu_backend && cpu_backend != backend) {
+        ggml_backend_free(cpu_backend);
+    }
+    if (backend) {
+        ggml_backend_free(backend);
+    }
+
+    g_backend_pair = {nullptr, nullptr, nullptr, false};
+}
+
+BackendPair& global_backend_pair() {
+    if (!g_initialized) {
+        backend_init("global");
+    }
+    return g_backend_pair;
 }
 
 }  // namespace dasheng
