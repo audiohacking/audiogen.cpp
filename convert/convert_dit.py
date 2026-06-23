@@ -60,7 +60,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("src", help="local checkpoint dir or HF repo id (mispeech/Dasheng-AudioGen)")
     ap.add_argument("-o", "--out", default="dit.gguf")
-    ap.add_argument("--dtype", default="f16", choices=["f32", "f16"])
+    ap.add_argument("--dtype", default="f16", choices=["f32", "f16", "q8_0", "q4_0"])
     args = ap.parse_args()
 
     config_path, weights_path = resolve_paths(args.src)
@@ -79,9 +79,17 @@ def main():
     for key in META_BOOL_FIELDS:
         writer.add_bool(f"dasheng_audiogen.{key}", bool(config[key]))
 
-    np_dtype = np.float16 if args.dtype == "f16" else np.float32
+    # Determine dtype and quantization settings
+    use_quant = args.dtype in ("q8_0", "q4_0")
+    if use_quant:
+        quant_type = gguf.GGMLQuantizationType.Q8_0 if args.dtype == "q8_0" else gguf.GGMLQuantizationType.Q4_0
+        np_dtype = np.float32  # Quantization expects f32 input
+    else:
+        np_dtype = np.float16 if args.dtype == "f16" else np.float32
+        quant_type = None
 
     n_written = 0
+    n_quantized = 0
     with safe_open(weights_path, framework="numpy") as f:
         for name in f.keys():
             if name == "instruction_lengths":
@@ -95,18 +103,44 @@ def main():
             if not (name.startswith(TENSOR_PREFIXES) or name in EXTRA_TENSORS):
                 continue
             tensor = f.get_tensor(name)
-            # Keep 1-D tensors (biases, norms, RoPE inv_freq) in f32 for
-            # precision; only downcast 2-D+ weight matrices.
-            if tensor.dtype == np.float32 and np_dtype != np.float32 and tensor.ndim >= 2:
-                tensor = tensor.astype(np_dtype)
-            writer.add_tensor(name, tensor)
+
+            # Determine if this tensor should be quantized
+            # Only quantize 2D+ weight matrices, not biases/norms/small tensors
+            # Also check that dimensions are compatible with quantization block size (32)
+            # IMPORTANT: Only quantize backbone.* tensors (GPU), not content_adapter.* (CPU fallback)
+            block_size = 32
+            row_compatible = tensor.shape[-1] % block_size == 0 if tensor.ndim >= 1 else False
+
+            should_quantize = (
+                use_quant and
+                name.startswith('backbone.') and  # Only backbone tensors (run on GPU)
+                tensor.ndim >= 2 and
+                tensor.size >= 256 and
+                row_compatible and
+                not any(s in name.lower() for s in ['bias', 'norm', 'ln_'])
+            )
+
+            if should_quantize:
+                # Convert to f32 and quantize
+                tensor = tensor.astype(np.float32)
+                tensor = gguf.quants.quantize(tensor, quant_type)
+                writer.add_tensor(name, tensor, raw_dtype=quant_type)
+                n_quantized += 1
+            else:
+                # Keep 1-D tensors (biases, norms) in f32 for precision
+                if tensor.dtype == np.float32 and np_dtype != np.float32 and tensor.ndim >= 2:
+                    tensor = tensor.astype(np_dtype)
+                writer.add_tensor(name, tensor)
             n_written += 1
 
     writer.write_header_to_file()
     writer.write_kv_data_to_file()
     writer.write_tensors_to_file(progress=True)
     writer.close()
-    print(f"wrote {n_written} tensors to {args.out}")
+    if use_quant:
+        print(f"wrote {n_written} tensors ({n_quantized} quantized to {args.dtype.upper()}) to {args.out}")
+    else:
+        print(f"wrote {n_written} tensors to {args.out}")
 
 
 if __name__ == "__main__":

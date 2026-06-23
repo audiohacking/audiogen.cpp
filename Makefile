@@ -65,29 +65,55 @@ test-smoke-metal: metal
 	$(BUILD_DIR_METAL)/dasheng-audiogen --smoke-test
 
 # Download pre-converted models from HuggingFace
+# Default: F16 models (~5.7GB total)
 .PHONY: download-models
 download-models:
 	@mkdir -p models
-	@echo "Downloading models from audiohacking/dasheng-audiogen-gguf..."
+	@echo "Downloading F16 models (~5.7GB)..."
+	@$(call hf_download,t5_encoder.gguf dit.gguf vocoder.gguf spiece.model)
+	@echo "Models downloaded to models/"
+	@ls -lh models/
+
+# Q8 quantized models (~3.8GB total) - good quality, smaller size
+.PHONY: download-models-q8
+download-models-q8:
+	@mkdir -p models
+	@echo "Downloading Q8 models (~3.8GB)..."
+	@$(call hf_download,t5_encoder.gguf dit_Q8_0.gguf vocoder.gguf spiece.model)
+	@mv models/dit_Q8_0.gguf models/dit.gguf 2>/dev/null || true
+	@echo "Models downloaded to models/"
+	@ls -lh models/
+
+# Q4 quantized models (~2.8GB total) - smallest size, slight quality reduction
+.PHONY: download-models-q4
+download-models-q4:
+	@mkdir -p models
+	@echo "Downloading Q4 models (~2.8GB)..."
+	@$(call hf_download,t5_encoder.gguf dit_Q4_0.gguf vocoder.gguf spiece.model)
+	@mv models/dit_Q4_0.gguf models/dit.gguf 2>/dev/null || true
+	@echo "Models downloaded to models/"
+	@ls -lh models/
+
+# Helper function for HF download
+define hf_download
 	@if command -v hf >/dev/null 2>&1; then \
-		hf download audiohacking/dasheng-audiogen-gguf --local-dir models/ --include "*.gguf" --include "*.model"; \
+		for f in $(1); do hf download audiohacking/dasheng-audiogen-gguf $$f --local-dir models/; done; \
 	elif command -v huggingface-cli >/dev/null 2>&1; then \
-		huggingface-cli download audiohacking/dasheng-audiogen-gguf --local-dir models/ --include "*.gguf" --include "*.model"; \
+		for f in $(1); do huggingface-cli download audiohacking/dasheng-audiogen-gguf $$f --local-dir models/; done; \
 	else \
 		echo "Error: hf or huggingface-cli not found. Install with: pip install huggingface_hub[cli]"; \
 		exit 1; \
 	fi
-	@echo "Models downloaded to models/"
-	@ls -lh models/
+endef
 
 # Convert models to GGUF (alternative to downloading)
 .PHONY: convert
 convert:
 	@mkdir -p models
-	@echo "Converting T5 encoder (F32 to avoid precision issues)..."
+	@echo "Converting T5 encoder..."
 	python convert/convert_t5_encoder.py google/flan-t5-large -o models/t5_encoder.gguf --dtype f32
-	@echo "Converting DiT..."
-	python convert/convert_dit.py mispeech/Dasheng-AudioGen -o models/dit.gguf
+	@echo "Converting DiT (F16)..."
+	python convert/convert_dit.py mispeech/Dasheng-AudioGen -o models/dit.gguf --dtype f16
 	@echo "Converting Vocoder..."
 	python convert/convert_vocoder.py mispeech/dashengtokenizer -o models/vocoder.gguf
 	@echo "Copying sentencepiece model..."
@@ -99,6 +125,32 @@ convert:
 	@echo "Models saved to models/"
 	@ls -lh models/
 
+# Convert with Q8 quantization
+.PHONY: convert-q8
+convert-q8:
+	@mkdir -p models
+	@echo "Converting T5 encoder..."
+	python convert/convert_t5_encoder.py google/flan-t5-large -o models/t5_encoder.gguf --dtype f32
+	@echo "Converting DiT (Q8_0)..."
+	python convert/convert_dit.py mispeech/Dasheng-AudioGen -o models/dit.gguf --dtype q8_0
+	@echo "Converting Vocoder..."
+	python convert/convert_vocoder.py mispeech/dashengtokenizer -o models/vocoder.gguf
+	@cp ~/.cache/huggingface/hub/models--google--flan-t5-large/snapshots/*/spiece.model models/ 2>/dev/null || true
+	@ls -lh models/
+
+# Convert with Q4 quantization
+.PHONY: convert-q4
+convert-q4:
+	@mkdir -p models
+	@echo "Converting T5 encoder..."
+	python convert/convert_t5_encoder.py google/flan-t5-large -o models/t5_encoder.gguf --dtype f32
+	@echo "Converting DiT (Q4_0)..."
+	python convert/convert_dit.py mispeech/Dasheng-AudioGen -o models/dit.gguf --dtype q4_0
+	@echo "Converting Vocoder..."
+	python convert/convert_vocoder.py mispeech/dashengtokenizer -o models/vocoder.gguf
+	@cp ~/.cache/huggingface/hub/models--google--flan-t5-large/snapshots/*/spiece.model models/ 2>/dev/null || true
+	@ls -lh models/
+
 # Quick test run
 .PHONY: test-e2e
 test-e2e: cpu
@@ -108,7 +160,7 @@ test-e2e: cpu
 # Show help
 .PHONY: help
 help:
-	@echo "dasheng-audiogen build targets:"
+	@echo "audiogen.cpp build targets:"
 	@echo ""
 	@echo "Build:"
 	@echo "  make cpu              Build CPU-only version"
@@ -117,8 +169,12 @@ help:
 	@echo "  make build-all        Build both CPU and Metal versions"
 	@echo ""
 	@echo "Models:"
-	@echo "  make download-models  Download pre-converted GGUF models from HuggingFace"
-	@echo "  make convert          Convert models yourself from original weights"
+	@echo "  make download-models     Download F16 GGUF models (~5.7GB)"
+	@echo "  make download-models-q8  Download Q8 quantized models (~3.8GB)"
+	@echo "  make download-models-q4  Download Q4 quantized models (~2.8GB)"
+	@echo "  make convert             Convert models from original weights (F16)"
+	@echo "  make convert-q8          Convert with Q8 quantization"
+	@echo "  make convert-q4          Convert with Q4 quantization"
 	@echo ""
 	@echo "Test:"
 	@echo "  make test-smoke       Run smoke test (CPU)"

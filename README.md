@@ -40,9 +40,18 @@ make cuda         # CUDA backend (Linux)
 ## Download Models
 
 ```bash
+# F16 models (~5.7GB) - best quality
 make download-models
 
-# Or manually:
+# Q8 models (~3.8GB) - good quality, 33% smaller
+make download-models-q8
+
+# Q4 models (~2.8GB) - smallest, 51% smaller
+make download-models-q4
+```
+
+Or manually:
+```bash
 hf download audiohacking/dasheng-audiogen-gguf --local-dir models/
 ```
 
