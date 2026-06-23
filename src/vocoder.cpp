@@ -38,7 +38,7 @@ std::vector<float> Vocoder::decode(const std::vector<float> &latent, int T) {
     const int n_freq = n_fft / 2 + 1;                                                     // 641
     const int T2 = (T - 1) * kUpsampleStride + kUpsampleStride;                            // 2*T
 
-    const size_t mem_size = 512ull * 1024 * 1024 + static_cast<size_t>(T2) * 1200000ull;
+    const size_t mem_size = 512ull * 1024 * 1024 + static_cast<size_t>(T2) * 1800000ull;
     struct ggml_init_params cparams = {mem_size, nullptr, false};
     struct ggml_context *ctx = ggml_init(cparams);
     if (!ctx) {

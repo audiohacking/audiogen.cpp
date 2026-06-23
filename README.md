@@ -85,6 +85,7 @@ Tags: `--caption`, `--speech`, `--asr`, `--sfx`, `--music`, `--env`
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--steps N` | 25 | Diffusion steps |
+| `--duration SECS` | 10 | Audio duration in seconds |
 | `--cfg SCALE` | 3.0 | Guidance scale |
 | `--seed N` | random | Random seed |
 | `--threads N` | 4 | CPU threads |

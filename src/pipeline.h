@@ -13,6 +13,7 @@ struct PipelineConfig {
     int num_steps = 25;
     float guidance_scale = 3.0f;
     float sway_sampling_coef = -1.0f;
+    float duration_seconds = 0.0f;  // 0 = auto (model prediction)
     int n_threads = 4;
     unsigned int seed = 0;  // 0 = random seed
 };

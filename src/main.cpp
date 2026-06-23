@@ -244,6 +244,7 @@ int main(int argc, char **argv) {
                      "  --env TEXT         Environment/ambience (<|env|> tag)\n"
                      "\nGeneration options:\n"
                      "  --steps N          Number of diffusion steps (default: 25)\n"
+                     "  --duration SECS    Audio duration in seconds (default: 10)\n"
                      "  --cfg SCALE        Classifier-free guidance scale (default: 3.0)\n"
                      "  --sway COEF        Sway sampling coefficient (default: -1.0)\n"
                      "  --seed N           Random seed (default: random)\n"
@@ -281,6 +282,7 @@ int main(int argc, char **argv) {
     std::string output_path = "output.wav";
     std::string output_dir = ".";
     int num_steps = 25;
+    float duration_seconds = 10.0f;
     float cfg_scale = 3.0f;
     float sway_coef = -1.0f;
     int n_threads = 4;
@@ -306,6 +308,8 @@ int main(int argc, char **argv) {
             batch_file = argv[++i];
         } else if (std::strcmp(argv[i], "--steps") == 0 && i + 1 < argc) {
             num_steps = std::atoi(argv[++i]);
+        } else if (std::strcmp(argv[i], "--duration") == 0 && i + 1 < argc) {
+            duration_seconds = static_cast<float>(std::atof(argv[++i]));
         } else if (std::strcmp(argv[i], "--cfg") == 0 && i + 1 < argc) {
             cfg_scale = static_cast<float>(std::atof(argv[++i]));
         } else if (std::strcmp(argv[i], "--sway") == 0 && i + 1 < argc) {
@@ -374,6 +378,7 @@ int main(int argc, char **argv) {
     config.num_steps = num_steps;
     config.guidance_scale = cfg_scale;
     config.sway_sampling_coef = sway_coef;
+    config.duration_seconds = duration_seconds;
     config.n_threads = n_threads;
     if (seed_set) {
         config.seed = seed;
@@ -429,7 +434,7 @@ int main(int argc, char **argv) {
         std::fprintf(stderr, "\n[%zu/%zu] Generating: %s\n", i + 1, prompts.size(),
                      p.length() > 60 ? (p.substr(0, 57) + "...").c_str() : p.c_str());
 
-        std::vector<float> waveform = pipeline.generate(p, 0.0f);
+        std::vector<float> waveform = pipeline.generate(p, duration_seconds);
 
         // Determine output path
         std::string out;

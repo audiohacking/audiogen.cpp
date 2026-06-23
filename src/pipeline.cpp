@@ -47,8 +47,6 @@ Pipeline::Pipeline(const PipelineConfig &config) : impl_(new Impl(config)) {}
 Pipeline::~Pipeline() { delete impl_; }
 
 std::vector<float> Pipeline::generate(const std::string &prompt, float duration_seconds) {
-    (void)duration_seconds;  // Duration comes from the model's prediction
-
     // 1. Tokenize
     std::vector<int32_t> token_ids = impl_->tokenizer.encode(prompt);
     const int seq_len = static_cast<int>(token_ids.size());
@@ -60,9 +58,27 @@ std::vector<float> Pipeline::generate(const std::string &prompt, float duration_
 
     // 3. Content adapter
     ContentAdapterOutput ca_out = impl_->adapter.run(t5_hidden, seq_len);
-    const int T = ca_out.global_latent_length;
-    std::fprintf(stderr, "[pipeline] content adapter: context_len=%d, latent_length=%d\n",
-                 ca_out.context_len, T);
+
+    // Override duration if user specified (duration_seconds > 0)
+    // kLatentTokenRate = 25 (16kHz / 640 downsampling)
+    constexpr int kLatentTokenRate = 25;
+    int T = ca_out.global_latent_length;
+    if (duration_seconds > 0.0f) {
+        T = static_cast<int>(std::round(duration_seconds * kLatentTokenRate));
+        // Resize time_aligned_content to match new duration
+        ca_out.time_aligned_content.resize(static_cast<size_t>(T) * kContentDim);
+        std::vector<float> dummy_ta(kContentDim);
+        std::memcpy(dummy_ta.data(), ca_out.time_aligned_content.data(), kContentDim * sizeof(float));
+        for (int t = 1; t < T; ++t) {
+            std::memcpy(ca_out.time_aligned_content.data() + static_cast<size_t>(t) * kContentDim,
+                        dummy_ta.data(), kContentDim * sizeof(float));
+        }
+        std::fprintf(stderr, "[pipeline] content adapter: context_len=%d, latent_length=%d (user override: %.1fs)\n",
+                     ca_out.context_len, T, duration_seconds);
+    } else {
+        std::fprintf(stderr, "[pipeline] content adapter: context_len=%d, latent_length=%d (predicted: %.1fs)\n",
+                     ca_out.context_len, T, static_cast<float>(T) / kLatentTokenRate);
+    }
 
     // 4. Initialize latent noise
     std::vector<float> latent(static_cast<size_t>(T) * kLatentDim);
