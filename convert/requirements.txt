@@ -1,0 +1,5 @@
+gguf
+safetensors
+huggingface_hub
+numpy
+torch

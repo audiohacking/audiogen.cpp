@@ -1,0 +1,8 @@
+build/
+build-*/
+*.gguf
+*.wav
+.venv/
+.DS_Store
+__pycache__/
+*.pyc
