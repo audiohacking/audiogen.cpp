@@ -1,6 +1,6 @@
 # audiogen.cpp
 
-High-performance C++17 GGML inference engine for local text-to-audio generation for [`Dasheng-AudioGen`](https://huggingface.co/mispeech/Dasheng-AudioGen) using pre-converted GGUF weights [`audiohacking/dasheng-audiogen-gguf`](https://huggingface.co/audiohacking/dasheng-audiogen-gguf)
+High-performance C++17 GGML inference engine for [`Dasheng-AudioGen`](https://huggingface.co/mispeech/Dasheng-AudioGen) using pre-converted and quantized GGUF weights [`audiohacking/dasheng-audiogen-gguf`](https://huggingface.co/audiohacking/dasheng-audiogen-gguf)
 
 **Dasheng-AudioGen** is a unified audio generation model that can jointly synthesize **intelligible speech, music, sound effects, and environmental acoustics** from text descriptions.
 
