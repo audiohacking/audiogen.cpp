@@ -40,10 +40,18 @@ make download-models
 
 ## Performance
 
-| Backend | 10s @ 25 Steps | Hardware |
-|---------|----------|----------|
-| Metal GPU | ~6s | Apple M3 Ultra |
-| CPU | ~163s | Apple M3 Ultra (16 threads) |
+With 25 steps and 10s generations C++ is ~3.7x faster than Python (apple metal)
+
+
+| Prompt                                         |     Python |        C++ |   Speedup |
+| ---------------------------------------------- | ---------: | ---------: | --------: |
+| `<\|caption\|> A dog barking loudly`           |     22.67s |      5.97s |     3.80x |
+| `<\|caption\|> Birds chirping in a forest <`   |     22.22s |      6.06s |     3.66x |
+| `<\|caption\|> Thunder and rain <\|music\|> d` |     22.35s |      6.07s |     3.68x |
+| **TOTAL**                                      | **67.24s** | **18.11s** | **3.71x** |
+
+> Per-step average: Python=897ms, C++=241ms
+
 
 ## Build
 
